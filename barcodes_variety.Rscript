@@ -1,0 +1,102 @@
+
+library(data.table)
+library(DESeq2)
+fread('gel_barcodes_variety.txt') -> result
+head(result)
+summary(result)
+f= result[,-1]
+f = as.data.frame(f)
+f[is.na(f)] <- 0
+head(f)
+f = as.data.frame(f)
+row.names(f) <- f$ID
+head(f)
+f2 <- f[,-1]
+head(f2)
+
+colData <- data.frame(
+  condition = factor(c(rep("control", 4), rep("treat", 2)))
+)
+dds <- DESeqDataSetFromMatrix(countData = f2,
+                              colData = colData,
+                              design = ~ condition)
+
+dds_out <- DESeq(dds)
+res <- results(dds_out, contrast = c('condition', 'treat', 'control'))
+res1 <- data.frame(res, stringsAsFactors = FALSE, check.names = FALSE)
+res1$V2 = rownames(res1)
+head(res1)
+
+res_deseq <- res[order(res$padj),]
+res_diff_data <- merge(as.data.frame(res),as.data.frame(counts(dds_out,normalize=TRUE)),by="row.names",sort=FALSE)
+res_diff_data <- res_diff_data[order(res_diff_data$pvalue),]
+head(res_diff_data)
+nrow(res_diff_data[res_diff_data$log2FoldChange > 0.5,])
+
+
+res_diff_data$padj[res_diff_data$padj == 0] <- 1e-300
+
+volcano <- res_diff_data
+head(volcano)
+threshold <- as.factor(ifelse(volcano$padj <=0.05 & abs(volcano$log2FoldChange) >= 0,ifelse(volcano$log2FoldChange >= 0,'Up','Down'),'Not'))
+library(ggplot2)
+library(ggplot2)
+
+
+output_col <- res_diff_data[, c("addrpe1","addrpe2")]
+output_col_log <- log(output_col)
+
+correlation <- cor(output_col_log$addrpe1, output_col_log$addrpe2)
+
+
+
+newdf <- res_diff_data[, c("Row.names", "add17", "add18", "add21", "add22","addrpe1","addrpe2")]
+
+newdf$input <- apply(newdf[, c("add17", "add18", "add21", "add22")], 1, median)
+newdf$output1 <- apply(newdf[, c("addrpe1","addrpe2")], 1, mean)
+newdf$output2 <- apply(newdf[, c("addbtt24","addbtt26")], 1, mean)
+head(newdf)
+r4 <- newdf[, c("Row.names", "input", "output1")]
+colnames(r4)[1] <- 'V2'
+head(r4)
+
+read.table('rpe_alt_oligo.txt',header = FALSE) -> alt_oligo
+read.table('rpe_ref_oligo.txt',header = FALSE) -> ref_oligo
+merge(alt_oligo,r4,by='V2') -> alt_r4
+merge(ref_oligo,r4,by='V2') -> ref_r4
+r4_merge <- merge(ref_r4,alt_r4,by = 'V1', suffixes = c(".ref", ".alt"))
+head(r4_merge)
+r4_merge$fisher_pval <- NA  # Initialize the column with NA
+
+for (i in 1:nrow(r4_merge)) {
+  output_ref_rounded <- as.integer(round(r4_merge[i, "output1.ref"], 2))
+  output_alt_rounded <- as.integer(round(r4_merge[i, "output1.alt"], 2))
+  input_ref_rounded <- as.integer(round(r4_merge[i, "input.ref"], 2))
+  input_alt_rounded <- as.integer(round(r4_merge[i, "input.alt"], 2))
+  table_data <- matrix(c(output_ref_rounded, output_alt_rounded, input_ref_rounded, input_alt_rounded), nrow = 2)
+  if (all(is.finite(table_data)) && all(table_data >= 0)) {
+    fisher_result <- fisher.test(table_data)
+    r4_merge$fisher_pval[i] <- fisher_result$p.value
+  }
+}
+
+p_adjusted <- p.adjust(r4_merge$fisher_pval, method = "BH")
+
+
+r4_merge$fisher_pval_adj <- p_adjusted
+head(r4_merge)
+r4_merge$ref_log2foldchange = log2(r4_merge$output1.ref/r4_merge$input.ref)
+r4_merge$alt_log2foldchange = log2(r4_merge$output1.alt/r4_merge$input.alt)
+r4_merge$delta_log2Foldchange = log2((r4_merge$output1.alt/r4_merge$input.alt)/(r4_merge$output1.ref/r4_merge$input.ref))
+nrow(r4_merge[r4_merge$fisher_pval_adj <0.01 & r4_merge$avr_logfc>0 & (r4_merge$delta_log2Foldchange>1 | r4_merge$delta_log2Foldchange< -1),])
+r4_merge$avr_logfc = (r4_merge$ref_log2foldchange + r4_merge$alt_log2foldchange)/2
+
+split_values <- strsplit(r4_merge$V1, "_")
+
+r4_merge$V1_suffix <- sapply(split_values, `[`, 2)
+r4_merge$V1 <- r4_merge$V1_suffix
+r4_merge$V1_suffix <- NULL
+head(r4_merge)
+
+
+
