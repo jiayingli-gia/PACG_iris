@@ -1,0 +1,40 @@
+####： blooming .script
+for f in **1.fq.gz; do
+id=$(echo "$f" | sed 's/1.fq.gz//')
+flash "$id"1.fq.gz "$id"2.fq.gz -M 150 -O -o flashed"$id"
+cutadapt -j 80 -a TCGACGAATTCGGCCGGCCG flashed"$id".extendedFrags.fastq > rmada_flashed"$id".extendedFrags.fastq
+cutadapt -j 80 -g tctagagcatgcaccggtac rmada_flashed"$id".extendedFrags.fastq > rmfor"$id".fastq
+####the path need to be revised
+bwa mem -t 100 /home/lijy/E06_MPRA/rpe-input0606/bwarpe/bwarpe172  rmfor*"$id".fastq -M > bwa1_"$id".sam
+samtools view -@ 80 -F 4 -F 256 bwa1_"$id".sam -h  > bwa_uniq_mapped_"$id".sam
+grep $'10S\t'   bwa_uniq_mapped_"$id".sam | grep GCTAGCCATT| grep ATTTCTCTAT > 10_grep_"$id".sam2
+
+python [filter.sam.py](http://filter.sam.py/) 10_grep_"$id" 172
+sed 's/ //g' 10_grep_"$id".sam3|cut -f 3 >  oligo_"$id".sam3
+sed 's/ //g' 10_grep_"$id".UMI > UMI_"$id".sam3
+paste oligo_"$id".sam3 UMI_"$id".sam3 | grep -v N| sort| uniq -c |  sed 's/^[ ]\{1,\}//g' | sed 's/ /\t/g'> uniq_count_"$id".tab
+*R -e "
+library(data.table);
+fread('uniq_count*${id}.tab', fill = TRUE, header = FALSE) -> rm${id};
+fread('/home/lijy/E06_MPRA/rpe-input0606/inputmap/input_map.txt', fill = TRUE, header = F) -> input;
+rm${id}\$V2 <- substr(rm${id}\$V2, 1, nchar(rm${id}\$V2) - 1);
+rm${id}\$newbar <- paste0(rm${id}\$V2, rm${id}\$V3);
+colnames(rm${id})[2] <- 'ID';
+colnames(input) <- c('ID', 'newbar');
+head(rm${id})
+head(input)
+rm${id}[input, on = 'newbar', nomatch = 0][, ID := [i.ID](http://i.id/)] -> adjust_rm${id};
+setDT(adjust_rm${id});
+count_adjust_rm${id} <- adjust_rm${id}[, .N, by = ID];
+write.table(count_adjust_rm${id}, 'shiny${id}.tab', sep = '\t', quote = FALSE, row.names = FALSE, col.names = FALSE);
+"
+
+########################summary
+
+grep -c "^@"  rmada_flashed_"$id".extendedFrags.fastq
+samtools view -@ 80 -c  bwa1_"$id".sam
+samtools view -@ 80 -c bwa_uniq_mapped_"$id".sam
+wc -l 10_grep_"$id".sam2
+wc -l oligo_"$id".sam3
+wc -l  uniq_count_"$id".tab
+done
